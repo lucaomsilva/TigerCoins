@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from PIL import Image
+from src.data_handler import baixar_dados, preparar_dados
+from src.model_train import treinar_modelo, prever_modelo, avaliar_modelo
+from src.visualizer import grafico_predicao
+import yfinance as yf
 
 # --- Configuração da Página ---
 # Define o título da página, o ícone e o layout. O layout "wide" usa mais espaço da tela.
@@ -89,6 +93,23 @@ with st.sidebar.expander("Parametrização Avançada (Opcional)"):
 
 st.sidebar.markdown("---")
 
+# --- Exibir dados da cripto alvo na tela principal ---
+st.subheader(f"Visualização dos Dados de Fechamento - {cripto_alvo}")
+
+data_inicio = "2022-01-01"
+data_fim = "2024-04-01"
+
+try:
+    df_temp = baixar_dados(cripto_alvo, [], start=data_inicio, end=data_fim)
+    if df_temp.empty:
+        st.warning("⚠️ Nenhum dado disponível para o período selecionado.")
+    else:
+        df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})
+        st.dataframe(df_temp.tail(15))  # Exibe os últimos 15 registros
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+
+
 # --- Botão de Execução ---
 # Este botão centraliza a ação do usuário para iniciar o processo.
 executar = st.sidebar.button(
@@ -101,87 +122,89 @@ st.title(f"Predição para {cripto_alvo}")
 st.markdown(
     "Configure as opções na barra lateral à esquerda e clique em **Executar Predição** para iniciar."
 )
+# --- Exibir dados da cripto alvo na tela principal ---
+st.subheader(f"Visualização dos Dados de Fechamento - {cripto_alvo}")
+
+try:
+    df_temp = baixar_dados(cripto_alvo, [])  # só a cripto alvo, sem auxiliares
+    df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})  # renomeia para consistência
+    st.dataframe(df_temp.tail(15))  # mostra os últimos 15 registros
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+
 
 # O código abaixo só será executado quando o botão for pressionado.
 if executar:
-    # --- LÓGICA DE EXECUÇÃO (PLACEHOLDER) ---
-    # Aqui é onde você vai chamar as funções da Fase 1 e 3 do seu plano.
-    # 1. Chamar data_handler.py para baixar os dados
-    # 2. Chamar o pré-processamento e engenharia de características
-    # 3. Chamar o model_trainer.py para treinar o modelo selecionado
-    # 4. Chamar o visualizer.py para gerar os gráficos
+    import numpy as np
 
-    with st.spinner(
-        f"Executando predição com {algoritmo_selecionado}... Por favor, aguarde."
-    ):
-        # Simulação de dados para o gráfico de exemplo
-        # No seu projeto, estes dados virão do seu modelo.
-        dados_historicos_exemplo = pd.DataFrame({
-            "Data": pd.to_datetime([
-                "2023-01-01",
-                "2023-01-02",
-                "2023-01-03",
-                "2023-01-04",
-                "2023-01-05",
-            ]),
-            "Preço": [20000, 20500, 20300, 21000, 20800],
+    with st.spinner(f"Executando predição com {algoritmo_selecionado}... Por favor, aguarde."):
+        # 1. Baixar dados
+        df = baixar_dados(cripto_alvo, ativos_auxiliares, start=data_inicio, end=data_fim)
+        df = df.rename(columns={cripto_alvo: 'alvo'})  # para padronizar target
+        # 2. Preparar dados
+        X, y = preparar_dados(
+            df, 
+            janela=tamanho_janela, 
+            horizonte=horizonte, 
+            target='alvo',
+            tipo_saida='regressao' if tipo_saida.startswith("Valor") else 'classificacao'
+        )
+        # Usar 80% treino, 20% predição futura
+        split = int(0.8 * len(X))
+        if X.empty or y.empty:
+            st.error("Erro: Dados insuficientes após o processamento. Tente reduzir o tamanho da janela ou o horizonte.")
+            st.stop()
+
+        X_train, X_test = X[:split], X[split:]
+        y_train, y_test = y[:split], y[split:]
+
+        # 3. Configurar parâmetros do modelo conforme escolhido
+        params = {}
+        if algoritmo_selecionado == "Random Forest":
+            params['n_estimators'] = n_estimators
+        elif algoritmo_selecionado == "KNN":
+            params['n_neighbors'] = n_neighbors
+        elif algoritmo_selecionado == "SVM":
+            params['kernel'] = svm_kernel
+
+        # 4. Treinar e prever
+        modelo = treinar_modelo(X_train, y_train, algoritmo_selecionado, parametros=params)
+        predicoes = prever_modelo(modelo, X_test)
+        metrica = avaliar_modelo(y_test, predicoes)
+
+        # 5. Construir DataFrames para plot
+        datas = df.index[split + tamanho_janela + horizonte - 1:]
+        dados_historicos = pd.DataFrame({
+            "Data": df.index[: split + tamanho_janela + horizonte - 1],
+            "Preço": df['alvo'][: split + tamanho_janela + horizonte - 1],
         })
-        dados_predicao_exemplo = pd.DataFrame({
-            "Data": pd.to_datetime([
-                "2023-01-05",
-                "2023-01-06",
-                "2023-01-07",
-                "2023-01-08",
-            ]),
-            "Preço": [20800, 21200, 21500, 21300],
+
+        dados_predicao = pd.DataFrame({
+            "Data": datas,
+            "Preço": predicoes,
         })
 
         # --- Exibição dos Resultados ---
         st.subheader("Resultados da Predição")
-
-        # Gráfico com Plotly
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=dados_historicos_exemplo["Data"],
-                y=dados_historicos_exemplo["Preço"],
-                mode="lines",
-                name="Dados Históricos",
-                line=dict(color="royalblue"),
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=dados_predicao_exemplo["Data"],
-                y=dados_predicao_exemplo["Preço"],
-                mode="lines",
-                name="Predição",
-                line=dict(color="orange", dash="dash"),
-            )
-        )
-
-        fig.update_layout(
-            title=f"Histórico e Predição para {cripto_alvo}",
-            xaxis_title="Data",
-            yaxis_title="Preço (USD)",
-            legend_title="Legenda",
-        )
+        fig = grafico_predicao(dados_historicos, dados_predicao, nome_ativo=cripto_alvo)
         st.plotly_chart(fig, use_container_width=True)
 
         st.success("Predição concluída com sucesso!")
 
-        # Placeholder para outras métricas e resultados
+        # Métricas principais
         col1, col2 = st.columns(2)
         with col1:
-            st.metric(
-                label="Próximo Valor Previsto",
-                value=f"${dados_predicao_exemplo['Preço'].iloc[1]:,.2f}",
-            )
+            if algoritmo_selecionado == 'regressao':
+                st.metric(label="Próximo Valor Previsto", value=f"${predicoes[0]:,.2f}")
+            else:
+                direcao = "Alta" if predicoes[0] == 1 else "Queda"
+                st.metric(label="Próxima Tendência Prevista", value=direcao)
         with col2:
-            st.metric(
-                label="Tendência Prevista",
-                value="Alta" if "Alta" in tipo_saida else "Subida",
-            )
+            if algoritmo_selecionado == 'regressao':
+                st.metric(label="MAE", value=f"{metrica['MAE']:.2f}")
+            else:
+                st.metric(label="Acurácia", value=f"{metrica['Accuracy']*100:.2f}%")
+
 
 else:
     st.info("Aguardando configuração e execução.")
