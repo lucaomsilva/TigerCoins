@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from PIL import Image
-from src.data_handler import baixar_dados, preparar_dados
+from src.data_handler import preparar_dados, baixar_dados
 from src.model_train import treinar_modelo, prever_modelo, avaliar_modelo
 from src.visualizer import grafico_predicao
 import yfinance as yf
+import time
 
 # --- Configuração da Página ---
 # Define o título da página, o ícone e o layout. O layout "wide" usa mais espaço da tela.
@@ -94,28 +95,26 @@ with st.sidebar.expander("Parametrização Avançada (Opcional)"):
 st.sidebar.markdown("---")
 
 # --- Exibir dados da cripto alvo na tela principal ---
-st.subheader(f"Visualização dos Dados de Fechamento - {cripto_alvo}")
+# st.subheader(f"Visualização dos Dados de Fechamento - {cripto_alvo}")
 
 data_inicio = "2022-01-01"
 data_fim = "2024-04-01"
 
-try:
-    df_temp = baixar_dados(cripto_alvo, [], start=data_inicio, end=data_fim)
-    if df_temp.empty:
-        st.warning("⚠️ Nenhum dado disponível para o período selecionado.")
-    else:
-        df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})
-        st.dataframe(df_temp.tail(15))  # Exibe os últimos 15 registros
-except Exception as e:
-    st.error(f"Erro ao carregar dados: {e}")
-
+# try:
+#     df_temp = baixar_dados(cripto_alvo, [], start=data_inicio, end=data_fim)
+#     if df_temp.empty:
+#         st.warning("⚠️ Nenhum dado disponível para o período selecionado.")
+#     else:
+#         # df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})
+#         st.dataframe(df_temp.tail(15))  # Exibe os últimos 15 registros
+# except Exception as e:
+#     st.error(f"Erro ao carregar dados: {e}")
 
 # --- Botão de Execução ---
 # Este botão centraliza a ação do usuário para iniciar o processo.
 executar = st.sidebar.button(
     "Executar Predição", type="primary", use_container_width=True
 )
-
 
 # --- Área Principal da Aplicação ---
 st.title(f"Predição para {cripto_alvo}")
@@ -127,7 +126,7 @@ st.subheader(f"Visualização dos Dados de Fechamento - {cripto_alvo}")
 
 try:
     df_temp = baixar_dados(cripto_alvo, [])  # só a cripto alvo, sem auxiliares
-    df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})  # renomeia para consistência
+    # df_temp = df_temp.rename(columns={cripto_alvo: 'alvo'})  # renomeia para consistência
     st.dataframe(df_temp.tail(15))  # mostra os últimos 15 registros
 except Exception as e:
     st.error(f"Erro ao carregar dados: {e}")
@@ -174,10 +173,19 @@ if executar:
 
         # 5. Construir DataFrames para plot
         datas = df.index[split + tamanho_janela + horizonte - 1:]
+
+        print(df['alvo'].shape)
+        print(type(df['alvo']))
+
         dados_historicos = pd.DataFrame({
             "Data": df.index[: split + tamanho_janela + horizonte - 1],
-            "Preço": df['alvo'][: split + tamanho_janela + horizonte - 1],
+            "Preço": df['alvo'].iloc[: split + tamanho_janela + horizonte - 1, 0]
         })
+
+        print(type(datas), np.shape(datas))
+        print(type(predicoes), np.shape(predicoes))
+        predicoes = predicoes.flatten()
+
 
         dados_predicao = pd.DataFrame({
             "Data": datas,
@@ -203,7 +211,10 @@ if executar:
             if algoritmo_selecionado == 'regressao':
                 st.metric(label="MAE", value=f"{metrica['MAE']:.2f}")
             else:
-                st.metric(label="Acurácia", value=f"{metrica['Accuracy']*100:.2f}%")
+                try:
+                    st.metric(label="Acurácia", value=f"{metrica['Accuracy']*100:.2f}%")
+                except:
+                    pass
 
 
 else:
